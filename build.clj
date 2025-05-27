@@ -3,7 +3,7 @@
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib 'org.clojars.your-username/brainflow-java)
-(def version "5.12.2") ; Match BrainFlow version exactly
+(def version "5.16.0")
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
