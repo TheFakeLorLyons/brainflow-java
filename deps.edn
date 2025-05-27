@@ -3,7 +3,8 @@
  :aliases
  {:build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.9"
                                                 :exclusions [com.google.guava/guava
-                                                             org.slf4j/slf4j-nop]}}
+                                                             org.slf4j/slf4j-nop]}
+                 slipset/deps-deploy {:mvn/version "RELEASE"}}
           :ns-default build}
   :deploy {:extra-deps {io.github.clojure/tools.build {:git/tag "v0.9.4" :git/sha "76b78fe"}
                         slipset/deps-deploy {:mvn/version "RELEASE"}}
