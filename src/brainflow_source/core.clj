@@ -35,7 +35,7 @@
 
 (defn- get-cache-dir []
   (let [home (System/getProperty "user.home")
-        cache-dir (io/file home ".brainflow-clj" brainflow-version)]
+        cache-dir (io/file home ".brainflow-java" brainflow-version)]
     (.mkdirs cache-dir)
     cache-dir))
 
