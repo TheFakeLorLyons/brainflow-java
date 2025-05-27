@@ -1,4 +1,4 @@
-name: Deploy BrainFlow Clojure to Clojars
+name: Deploy BrainFlow Java code to Clojars to be used in Clojure
 
 on:
   push:

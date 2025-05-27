@@ -2,7 +2,7 @@
   (:require [clojure.tools.build.api :as b]
             [deps-deploy.deps-deploy :as dd]))
 
-(def lib 'com.github.thefakelorlyons/brainflow-java)
+(def lib 'org.clojars.thefakelorlyons/brainflow-java)
 (def version "5.16.0")
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
