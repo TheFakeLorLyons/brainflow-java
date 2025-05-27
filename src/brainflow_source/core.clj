@@ -1,0 +1,276 @@
+(ns brainflow-source.core
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str])
+  (:import [java.net URL URLClassLoader]           
+           [java.io File]
+           [java.util.concurrent.locks ReentrantLock]))
+
+(def ^:private brainflow-version "5.16.0")
+(def ^:private base-url "https://github.com/brainflow-dev/brainflow/releases/download")
+
+(def ^:private native-lib-mappings
+  {"linux-x86-64" {:files ["libBrainFlow.so" "libDataHandler.so" "libMLModule.so"]
+                   :archive "compiled_libs.tar"}
+   "darwin-x86-64" {:files ["libBrainFlow.dylib" "libDataHandler.dylib" "libMLModule.dylib"]
+                    :archive "compiled_libs.tar"}
+   "darwin-aarch64" {:files ["libBrainFlow.dylib" "libDataHandler.dylib" "libMLModule.dylib"]
+                     :archive "compiled_libs.tar"}
+   "win32-x86-64" {:files ["BrainFlow.dll" "DataHandler.dll" "MLModule.dll"]
+                   :archive "compiled_libs.tar"}})
+
+;; Thread-safe initialization
+(def ^:private initialization-lock (ReentrantLock.))
+(def ^:private initialized? (atom false))
+(def ^:private initialization-error (atom nil))
+
+(defn- get-os-arch []
+  (let [os-name (str/lower-case (System/getProperty "os.name"))
+        arch (System/getProperty "os.arch")]
+    (cond
+      (str/includes? os-name "linux") "linux-x86-64"
+      (and (str/includes? os-name "mac") (or (= arch "aarch64") (= arch "arm64"))) "darwin-aarch64"
+      (str/includes? os-name "mac") "darwin-x86-64"
+      (str/includes? os-name "windows") "win32-x86-64"
+      :else (throw (RuntimeException. (str "Unsupported platform: " os-name " " arch))))))
+
+(defn- get-cache-dir []
+  (let [home (System/getProperty "user.home")
+        cache-dir (io/file home ".brainflow-clj" brainflow-version)]
+    (.mkdirs cache-dir)
+    cache-dir))
+
+(defn- file-exists-and-valid? [file expected-min-size]
+  (and (.exists file)
+       (.isFile file)
+       (> (.length file) expected-min-size)))
+
+(defn- download-with-progress [url dest-file]
+  (println (str "Downloading " (.getName dest-file) "..."))
+  (try
+    (with-open [in (io/input-stream url)
+                out (io/output-stream dest-file)]
+      (let [buffer (byte-array 8192)
+            total-size (atom 0)]
+        (loop []
+          (let [bytes-read (.read in buffer)]
+            (when (pos? bytes-read)
+              (.write out buffer 0 bytes-read)
+              (swap! total-size + bytes-read)
+              (when (zero? (mod @total-size (* 1024 1024))) ; Progress every MB
+                (println (str "  Downloaded " (/ @total-size 1024 1024) " MB...")))
+              (recur))))))
+    (println (str "Download complete: " (.getName dest-file)))
+    (catch Exception e
+      (when (.exists dest-file) (.delete dest-file))
+      (throw (RuntimeException. (str "Failed to download " url ": " (.getMessage e)) e)))))
+
+(defn- extract-tar [tar-file dest-dir]
+  (println "Extracting native libraries...")
+  (try
+    (let [pb (ProcessBuilder. ["tar" "-xf" (.getAbsolutePath tar-file) "-C" (.getAbsolutePath dest-dir)])
+          process (.start pb)
+          exit-code (.waitFor process)]
+      (when-not (zero? exit-code)
+        (throw (RuntimeException. (str "tar extraction failed with exit code: " exit-code)))))
+    (catch java.io.IOException e
+      ; Fallback: try to use Java's built-in capabilities or fail gracefully
+      (throw (RuntimeException.
+              (str "Failed to extract tar file. Please ensure 'tar' command is available: " (.getMessage e)) e)))))
+
+(defn- find-and-move-natives [cache-dir platform-dir lib-files]
+  (doseq [lib-file lib-files]
+    (let [dest-file (io/file platform-dir lib-file)]
+      (when-not (.exists dest-file)
+        ; Search for the file in the extracted contents
+        (let [found-files (filter #(= (.getName %) lib-file)
+                                  (file-seq cache-dir))]
+          (when-let [src-file (first found-files)]
+            (println (str "Moving " lib-file " to platform directory"))
+            (io/copy src-file dest-file)))))))
+
+(defn- download-and-cache-natives []
+  (let [platform (get-os-arch)
+        cache-dir (get-cache-dir)
+        platform-dir (io/file cache-dir "natives" platform)
+        lib-info (get native-lib-mappings platform)]
+
+    (.mkdirs platform-dir)
+
+    ; Check if all natives are already cached and valid
+    (let [all-cached? (every? #(file-exists-and-valid? (io/file platform-dir %) 1000)
+                              (:files lib-info))]
+      (when-not all-cached?
+        (println (str "Setting up BrainFlow native libraries for " platform "..."))
+
+        ; Download the archive
+        (let [archive-url (str base-url "/" brainflow-version "/" (:archive lib-info))
+              archive-file (io/file cache-dir (:archive lib-info))]
+
+          (when-not (file-exists-and-valid? archive-file 1000000) ; At least 1MB
+            (download-with-progress archive-url archive-file))
+
+          ; Extract natives
+          (extract-tar archive-file cache-dir)
+
+          ; Find and move files to platform directory
+          (find-and-move-natives cache-dir platform-dir (:files lib-info))
+
+          ; Verify all files were extracted successfully
+          (let [missing-files (remove #(.exists (io/file platform-dir %)) (:files lib-info))]
+            (when (seq missing-files)
+              (throw (RuntimeException.
+                      (str "Failed to extract native libraries: " (str/join ", " missing-files))))))
+
+          ; Clean up archive to save space
+          (.delete archive-file))))
+
+    ; Return the platform directory path
+    (.getAbsolutePath platform-dir)))
+
+(defn- add-jar-to-classpath [jar-file]
+  (try
+    (let [jar-url (.toURI (.toURL jar-file))
+          url-class-loader-method (.getDeclaredMethod URLClassLoader "addURL" (into-array Class [URL]))
+          _ (.setAccessible url-class-loader-method true)
+          class-loader (.getContextClassLoader (Thread/currentThread))]
+      (.invoke url-class-loader-method class-loader (into-array Object [(.toURL jar-url)]))
+      (println "BrainFlow JAR added to classpath"))
+    (catch Exception e
+      (throw (RuntimeException. (str "Failed to add JAR to classpath: " (.getMessage e)) e)))))
+
+(defn- download-and-cache-jar []
+  (let [cache-dir (get-cache-dir)
+        jar-file (io/file cache-dir "brainflow.jar")]
+
+    (when-not (file-exists-and-valid? jar-file 1000000) ; At least 1MB
+      (println "Downloading BrainFlow Java library...")
+      (let [jar-url (str base-url "/" brainflow-version "/brainflow.jar")]
+        (download-with-progress jar-url jar-file)))
+
+    jar-file))
+
+(defn- setup-native-library-path [native-path]
+  (let [current-path (System/getProperty "java.library.path")
+        new-path (if (str/blank? current-path)
+                   native-path
+                   (str current-path File/pathSeparator native-path))]
+    (System/setProperty "java.library.path" new-path)
+
+    ;; Clear the library path cache so Java will re-read it
+    (try
+      (let [field (.getDeclaredField ClassLoader "sys_paths")]
+        (.setAccessible field true)
+        (.set field nil nil))
+      (catch Exception e
+        (println "Warning: Could not clear library path cache:" (.getMessage e))))))
+
+(defn- ensure-brainflow-loaded!
+  "Ensures BrainFlow is loaded. Throws exception if initialization fails."
+  []
+  (when-not @initialized?
+    (.lock initialization-lock)
+    (try
+      (when-not @initialized?
+        (if-let [error @initialization-error]
+          (throw (RuntimeException. "BrainFlow initialization previously failed" error))
+          (try
+            (println "Initializing BrainFlow...")
+
+            ;; Download and set up Java library
+            (let [jar-file (download-and-cache-jar)]
+              (add-jar-to-classpath jar-file))
+
+            ;; Download and set up native libraries  
+            (let [native-path (download-and-cache-natives)]
+              (setup-native-library-path native-path))
+
+            (reset! initialized? true)
+            (println "BrainFlow initialization complete!")
+
+            (catch Exception e
+              (reset! initialization-error e)
+              (println "BrainFlow initialization failed:" (.getMessage e))
+              (throw e)))))
+      (finally
+        (.unlock initialization-lock)))))
+
+;; Macro to wrap BrainFlow functions with auto-loading
+(defmacro with-brainflow [& body]
+  `(do
+     (ensure-brainflow-loaded!)
+     ~@body))
+
+; Examples, these functions would ensure that the BrainFlow functions auto-load
+; (The files should cache and with-brainflow should only need to happen once)
+(defn get-board-shim
+  "Get a BrainFlow board shim. Automatically downloads BrainFlow if needed."
+  [board-id input-params]
+  (with-brainflow
+    (let [board-shim-class (Class/forName "brainflow.BoardShim")]
+      (.getDeclaredConstructor board-shim-class
+                               (into-array Class [Integer/TYPE String]))
+      (.newInstance (.getDeclaredConstructor board-shim-class
+                                             (into-array Class [Integer/TYPE String]))
+                    (into-array Object [board-id input-params])))))
+
+(defn prepare-session
+  "Prepare a BrainFlow session. Automatically downloads BrainFlow if needed."
+  [board-shim]
+  (with-brainflow
+    (.prepare_session board-shim)))
+
+(defn start-stream
+  "Start BrainFlow data stream. Automatically downloads BrainFlow if needed."
+  [board-shim & [buffer-size]]
+  (with-brainflow
+    (if buffer-size
+      (.start_stream board-shim buffer-size)
+      (.start_stream board-shim))))
+
+(defn stop-stream
+  "Stop BrainFlow data stream. Automatically downloads BrainFlow if needed."
+  [board-shim]
+  (with-brainflow
+    (.stop_stream board-shim)))
+
+(defn get-board-data
+  "Get data from BrainFlow board. Automatically downloads BrainFlow if needed."
+  [board-shim & [num-samples]]
+  (with-brainflow
+    (if num-samples
+      (.get_board_data board-shim num-samples)
+      (.get_board_data board-shim))))
+
+(defn release-session
+  "Release BrainFlow session. Automatically downloads BrainFlow if needed."
+  [board-shim]
+  (with-brainflow
+    (.release_session board-shim)))
+
+(defn brainflow-initialized?
+  "Check if BrainFlow has been initialized."
+  []
+  @initialized?)
+
+(defn get-brainflow-version
+  "Get the BrainFlow version this library uses."
+  []
+  brainflow-version)
+
+(defn clear-cache!
+  "Clear the BrainFlow cache directory. Use with caution."
+  []
+  (let [cache-dir (get-cache-dir)]
+    (when (.exists cache-dir)
+      (doseq [file (reverse (file-seq cache-dir))]
+        (when (.isFile file) (.delete file)))
+      (doseq [dir (reverse (file-seq cache-dir))]
+        (when (.isDirectory dir) (.delete dir))))
+    (reset! initialized? false)
+    (reset! initialization-error nil)
+    (println "BrainFlow cache cleared")))
+
+(defn init!
+  "Manually initialize BrainFlow. This is optional as initialization happens automatically."
+  []
+  (ensure-brainflow-loaded!))

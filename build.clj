@@ -2,7 +2,7 @@
   (:require [clojure.tools.build.api :as b]
             [deps-deploy.deps-deploy :as dd]))
 
-(def lib 'org.clojars.your-username/brainflow-java)
+(def lib 'com.github.thefakelorlyons/brainflow-clj)
 (def version "5.16.0")
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
@@ -16,12 +16,12 @@
                 :lib lib
                 :version version
                 :basis basis
-                :resource-dirs ["resources"]
-                :scm {:url "https://github.com/your-username/brainflow-java-clojars"
-                      :connection "scm:git:git://github.com/your-username/brainflow-java-clojars.git"
-                      :developerConnection "scm:git:ssh://git@github.com/your-username/brainflow-java-clojars.git"
+                :src-dirs ["src"]
+                :scm {:url "https://github.com/thefakelorlyons/brainflow-java"
+                      :connection "scm:git:git://github.com/thefakelorlyons/brainflow-java.git"
+                      :developerConnection "scm:git:ssh://git@github.com/thefakelorlyons/brainflow-java.git"
                       :tag (str "v" version)}
-                :pom-data [[:description "BrainFlow Java library packaged for Clojars - signal acquisition library for EEG, EMG, ECG"]
+                :pom-data [[:description "Lightweight BrainFlow Clojure wrapper with automatic native library downloading"]
                            [:url "https://brainflow.org"]
                            [:licenses
                             [:license
@@ -29,10 +29,12 @@
                              [:url "https://github.com/brainflow-dev/brainflow/blob/master/LICENSE"]]]
                            [:developers
                             [:developer
-                             [:name "BrainFlow Team"]
-                             [:url "https://brainflow.org"]]]]})
-  (b/copy-dir {:src-dirs ["resources"]
+                             [:name "Lorelai Lyons"]
+                             [:email "thefakelorlyons@gmail.com"]]]]})
+
+  (b/copy-dir {:src-dirs ["src"]
                :target-dir class-dir})
+
   (b/jar {:class-dir class-dir
           :jar-file jar-file}))
 

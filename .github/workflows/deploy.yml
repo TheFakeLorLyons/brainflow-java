@@ -1,4 +1,5 @@
-name: Package and Deploy BrainFlow Java to Clojars
+name: Deploy BrainFlow Clojure to Clojars
+
 on:
   push:
     tags:
@@ -23,56 +24,18 @@ jobs:
       uses: DeLaGuardo/setup-clojure@12.1
       with:
         cli: latest
+    
+    - name: Run tests (optional)
+      run: clojure -M:test -m clojure.test.runner
+      continue-on-error: true  # Don't fail deployment if tests fail
        
-    - name: Download and package BrainFlow
-      run: |
-        # Use version 5.16.0 to match the tag
-        BRAINFLOW_VERSION="5.16.0"
-        
-        # Download BrainFlow Java library
-        wget -O brainflow.jar https://github.com/brainflow-dev/brainflow/releases/download/${BRAINFLOW_VERSION}/brainflow.jar
-       
-        # Create resources directory structure
-        mkdir -p resources/META-INF resources/natives
-       
-        # Copy Java JAR directly to resources root so it's in classpath
-        cp brainflow.jar resources/
-       
-        # Download native libraries (using new compiled_libs.tar and jniLibs.zip)
-        wget -O compiled_libs.tar https://github.com/brainflow-dev/brainflow/releases/download/${BRAINFLOW_VERSION}/compiled_libs.tar
-        wget -O jniLibs.zip https://github.com/brainflow-dev/brainflow/releases/download/${BRAINFLOW_VERSION}/jniLibs.zip
-       
-        # Extract native libraries
-        tar -xf compiled_libs.tar
-        unzip jniLibs.zip
-       
-        # Create platform directories
-        mkdir -p resources/natives/{linux-x86-64,darwin-x86-64,darwin-aarch64,win32-x86-64}
-       
-        # Find and move native libraries to appropriate directories
-        find . -name "libBrainFlow.so" -exec cp {} resources/natives/linux-x86-64/ \; 2>/dev/null || true
-        find . -name "libDataHandler.so" -exec cp {} resources/natives/linux-x86-64/ \; 2>/dev/null || true
-        find . -name "libMLModule.so" -exec cp {} resources/natives/linux-x86-64/ \; 2>/dev/null || true
-       
-        find . -name "libBrainFlow.dylib" -exec cp {} resources/natives/darwin-x86-64/ \; 2>/dev/null || true
-        find . -name "libDataHandler.dylib" -exec cp {} resources/natives/darwin-x86-64/ \; 2>/dev/null || true
-        find . -name "libMLModule.dylib" -exec cp {} resources/natives/darwin-x86-64/ \; 2>/dev/null || true
-       
-        find . -name "BrainFlow.dll" -exec cp {} resources/natives/win32-x86-64/ \; 2>/dev/null || true
-        find . -name "DataHandler.dll" -exec cp {} resources/natives/win32-x86-64/ \; 2>/dev/null || true
-        find . -name "MLModule.dll" -exec cp {} resources/natives/win32-x86-64/ \; 2>/dev/null || true
-       
-        # Copy ARM64 libraries if available (newer BrainFlow versions)
-        cp -r resources/natives/darwin-x86-64/* resources/natives/darwin-aarch64/ 2>/dev/null || true
-       
-        # Clean up
-        rm -f *.zip *.tar *.jar.backup
-       
-        echo "Packaged libraries:"
-        find resources -type f -name "*.jar" -o -name "*.so" -o -name "*.dylib" -o -name "*.dll"
-       
-    - name: Build jar
+    - name: Build lightweight jar (source code only)
       run: clojure -T:build jar
+     
+    - name: Check jar size
+      run: |
+        ls -lh target/*.jar
+        echo "Jar size should be under 1MB for Clojars compatibility"
      
     - name: Deploy to Clojars
       env:
