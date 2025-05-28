@@ -152,11 +152,11 @@
 
 (defn- download-and-cache-jar []
   (let [cache-dir (get-cache-dir)
-        jar-file (io/file cache-dir "brainflow.jar")]
+        jar-file (io/file cache-dir "brainflow-jar-with-dependencies.jar")]
 
     (when-not (file-exists-and-valid? jar-file 1000000) ; At least 1MB
-      (println "Downloading BrainFlow Java library...")
-      (let [jar-url (str base-url "/" brainflow-version "/brainflow.jar")]
+      (println "Downloading BrainFlow Java library with dependencies...")
+      (let [jar-url (str base-url "/" brainflow-version "/brainflow-jar-with-dependencies.jar")]
         (download-with-progress jar-url jar-file)))
 
     jar-file))
