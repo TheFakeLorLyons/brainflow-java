@@ -8,16 +8,6 @@
 (def ^:private brainflow-version "5.16.0")
 (def ^:private base-url "https://github.com/brainflow-dev/brainflow/releases/download")
 
-(def ^:private native-lib-mappings
-  {"linux-x86-64" {:files ["libBrainFlow.so" "libDataHandler.so" "libMLModule.so"]
-                   :archive "compiled_libs.tar"}
-   "darwin-x86-64" {:files ["libBrainFlow.dylib" "libDataHandler.dylib" "libMLModule.dylib"]
-                    :archive "compiled_libs.tar"}
-   "darwin-aarch64" {:files ["libBrainFlow.dylib" "libDataHandler.dylib" "libMLModule.dylib"]
-                     :archive "compiled_libs.tar"}
-   "win32-x86-64" {:files ["BrainFlow.dll" "DataHandler.dll" "MLModule.dll"]
-                   :archive "compiled_libs.tar"}})
-
 ; Thread-safe initialization
 (def ^:private initialization-lock (ReentrantLock.))
 (def ^:private initialized? (atom false))
@@ -77,52 +67,74 @@
       (throw (RuntimeException.
               (str "Failed to extract tar file. Please ensure 'tar' command is available: " (.getMessage e)) e)))))
 
-(defn- find-and-move-natives [cache-dir platform-dir lib-files]
-  (doseq [lib-file lib-files]
-    (let [dest-file (io/file platform-dir lib-file)]
-      (when-not (.exists dest-file)
-        ; Search for the file in the extracted contents
-        (let [found-files (filter #(= (.getName %) lib-file)
-                                  (file-seq cache-dir))]
-          (when-let [src-file (first found-files)]
-            (println (str "Moving " lib-file " to platform directory"))
-            (io/copy src-file dest-file)))))))
+(defn- get-platform-extensions []
+  "Get file extensions for the current platform"
+  (let [platform (get-os-arch)]
+    (cond
+      (str/starts-with? platform "linux") [".so"]
+      (str/starts-with? platform "darwin") [".dylib"]
+      (str/starts-with? platform "win32") [".dll"]
+      :else [])))
+
+(defn- is-native-lib-file?
+  "Check if file is a native library for the current platform"
+  [file platform-extensions]
+  (let [name (.getName file)]
+    (some #(.endsWith name %) platform-extensions)))
+
+(defn- copy-native-libs
+  "Copy all native libraries for the current platform"
+  [from-dir to-dir platform-extensions]
+  (let [copied-files (atom [])]
+    (doseq [file (file-seq from-dir)]
+      (when (and (.isFile file)
+                 (is-native-lib-file? file platform-extensions))
+        (let [dest (io/file to-dir (.getName file))]
+          (println "Copying native lib:" (.getName file))
+          (io/copy file dest)
+          (swap! copied-files conj (.getName file)))))
+    @copied-files))
+
+(defn- platform-dir-has-natives?
+  "Check if platform directory already has native libraries"
+  [platform-dir platform-extensions]
+  (let [files (filter #(.isFile %) (file-seq platform-dir))
+        native-files (filter #(is-native-lib-file? % platform-extensions) files)]
+    (seq native-files)))
 
 (defn- download-and-cache-natives []
   (let [platform (get-os-arch)
         cache-dir (get-cache-dir)
         platform-dir (io/file cache-dir "natives" platform)
-        lib-info (get native-lib-mappings platform)]
+        platform-extensions (get-platform-extensions)
+        archive-name "compiled_libs.tar"  ; Define the archive name
+        archive-file (io/file cache-dir archive-name)]
 
     (.mkdirs platform-dir)
 
-    ; Check if all natives are already cached and valid
-    (let [all-cached? (every? #(file-exists-and-valid? (io/file platform-dir %) 1000)
-                              (:files lib-info))]
-      (when-not all-cached?
-        (println (str "Setting up BrainFlow native libraries for " platform "..."))
+    ; Check if platform directory already has native libraries
+    (when-not (platform-dir-has-natives? platform-dir platform-extensions)
+      (println (str "Setting up BrainFlow native libraries for " platform "..."))
 
-        ; Download the archive
-        (let [archive-url (str base-url "/" brainflow-version "/" (:archive lib-info))
-              archive-file (io/file cache-dir (:archive lib-info))]
+      ; Download archive if needed
+      (when-not (file-exists-and-valid? archive-file 1000000) ; At least 1MB
+        (let [url (str base-url "/" brainflow-version "/" archive-name)]
+          (download-with-progress url archive-file)))
 
-          (when-not (file-exists-and-valid? archive-file 1000000) ; At least 1MB
-            (download-with-progress archive-url archive-file))
+      ; Extract and copy native libraries
+      (extract-tar archive-file cache-dir)
+      (let [copied-files (copy-native-libs cache-dir platform-dir platform-extensions)]
+        (println (str "Copied " (count copied-files) " native libraries: "
+                      (str/join ", " copied-files)))
 
-          ; Extract natives
-          (extract-tar archive-file cache-dir)
+        ; Verify we got some files
+        (when (empty? copied-files)
+          (throw (RuntimeException.
+                  (str "No native libraries found for platform " platform
+                       " with extensions " platform-extensions)))))
 
-          ; Find and move files to platform directory
-          (find-and-move-natives cache-dir platform-dir (:files lib-info))
-
-          ; Verify all files were extracted successfully
-          (let [missing-files (remove #(.exists (io/file platform-dir %)) (:files lib-info))]
-            (when (seq missing-files)
-              (throw (RuntimeException.
-                      (str "Failed to extract native libraries: " (str/join ", " missing-files))))))
-
-          ; Clean up archive to save space
-          (.delete archive-file))))
+      ; Clean up archive to save space
+      (.delete archive-file))
 
     ; Return the platform directory path
     (.getAbsolutePath platform-dir)))
