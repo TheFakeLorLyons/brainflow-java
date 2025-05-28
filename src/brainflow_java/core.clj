@@ -67,8 +67,9 @@
       (throw (RuntimeException.
               (str "Failed to extract tar file. Please ensure 'tar' command is available: " (.getMessage e)) e)))))
 
-(defn- get-platform-extensions []
+(defn- get-platform-extensions 
   "Get file extensions for the current platform"
+  []
   (let [platform (get-os-arch)]
     (cond
       (str/starts-with? platform "linux") [".so"]
@@ -355,7 +356,7 @@
 
      ; Step 2: Create board shim with proper parameters
      (println "Creating board shim...")
-     (let [board (get-board-shim-simple board-id input-params)]
+     (let [board (get-default-synth-board-shim board-id input-params)]
 
        (println "Preparing session...")
        (prepare-session board)
