@@ -214,16 +214,65 @@
 
 ; Examples, these functions would ensure that the BrainFlow functions auto-load
 ; (The files should cache and with-brainflow should only need to happen once)
+(defn create-input-params
+  "Create a BrainFlowInputParams object with the given parameters.
+   Common parameters include:
+   :serial_port - Serial port name (e.g. 'COM3', '/dev/ttyUSB0')
+   :ip_address - IP address for network boards
+   :ip_port - IP port for network boards  
+   :mac_address - MAC address for Bluetooth boards
+   :other_info - Additional info as needed
+   :serial_number - Serial number
+   :file - File path for file-based boards
+   :timeout - Timeout value
+   :master_board - Master board ID for some boards"
+  [params-map]
+  (with-brainflow
+    (let [params-class (Class/forName "brainflow.BrainFlowInputParams")
+          params-instance (.newInstance (.getDeclaredConstructor params-class (into-array Class [])))]
+
+      (doseq [[key value] params-map]
+        (when value
+          (let [field-name (name key)
+                field (.getDeclaredField params-class field-name)]
+            (.setAccessible field true)
+            (.set field params-instance value))))
+
+      params-instance)))
+
 (defn get-board-shim
-  "Get a BrainFlow board shim. Automatically downloads BrainFlow if needed."
+  "Get a BrainFlow board shim. Downloads BrainFlow if needed. Takes board-id (int) 
+   and input-params (map with keys like :serial_port, :ip_address, etc.)"
   [board-id input-params]
   (with-brainflow
-    (let [board-shim-class (Class/forName "brainflow.BoardShim")]
-      (.getDeclaredConstructor board-shim-class
-                               (into-array Class [Integer/TYPE String]))
+    (let [board-shim-class (Class/forName "brainflow.BoardShim")
+          params-class (Class/forName "brainflow.BrainFlowInputParams")
+          params-instance (.newInstance (.getDeclaredConstructor params-class (into-array Class [])))]
+
+      ; Set parameters on the BrainFlowInputParams instance
+      (doseq [[key value] input-params]
+        (when value  ; Only set non-nil values
+          (let [field-name (name key)
+                field (.getDeclaredField params-class field-name)]
+            (.setAccessible field true)
+            (.set field params-instance value))))
+
+      ; Create BoardShim with proper constructor signature
       (.newInstance (.getDeclaredConstructor board-shim-class
-                                             (into-array Class [Integer/TYPE String]))
-                    (into-array Object [board-id input-params])))))
+                                             (into-array Class [Integer/TYPE params-class]))
+                    (into-array Object [board-id params-instance])))))
+
+(defn get-default-synth-board-shim
+  "Simplified version that takes a board-id and optional parameters map"
+  ([board-id]
+   (get-board-shim board-id {}))
+  ([board-id params-map]
+   (with-brainflow
+     (let [params-instance (create-input-params params-map)
+           board-shim-class (Class/forName "brainflow.BoardShim")]
+       (.newInstance (.getDeclaredConstructor board-shim-class
+                                              (into-array Class [Integer/TYPE (.getClass params-instance)]))
+                     (into-array Object [board-id params-instance]))))))
 
 (defn prepare-session
   "Prepare a BrainFlow session. Automatically downloads BrainFlow if needed."
@@ -286,3 +335,51 @@
   "Manually initialize BrainFlow. This is optional as initialization happens automatically."
   []
   (ensure-brainflow-loaded!))
+
+(defn test-brainflow
+  "Test BrainFlow functionality with a synthetic board.
+   This is useful for verifying that BrainFlow is working correctly.
+   Returns true if successful, throws exception if failed."
+  ([]
+   (test-brainflow 0 {})) ; Default to synthetic board with no params
+  ([board-id input-params]
+   (try
+     (println "Testing BrainFlow...")
+
+     ; Step 0: Clean the currently existing cached files
+     (clear-cache!)
+
+     ; Step 1: Force initialization
+     (init!)
+     (assert (brainflow-initialized?) "BrainFlow failed to initialize")
+
+     ; Step 2: Create board shim with proper parameters
+     (println "Creating board shim...")
+     (let [board (get-board-shim-simple board-id input-params)]
+
+       (println "Preparing session...")
+       (prepare-session board)
+
+       (println "Starting stream...")
+       (start-stream board)
+
+       (Thread/sleep 2000) ; Give it 2 seconds to stream some data
+
+       (println "Stopping stream...")
+       (stop-stream board)
+
+       (println "Getting data...")
+       (let [data (get-board-data board)]
+         (println "Received data shape:" (str (count data) " channels, "
+                                              (if (seq data) (count (first data)) 0) " samples")))
+
+       (println "Releasing session...")
+       (release-session board))
+
+     (println "BrainFlow test succeeded ✅")
+     true
+
+     (catch Exception e
+       (println "BrainFlow test failed ❌")
+       (println (.getMessage e))
+       (throw e)))))
