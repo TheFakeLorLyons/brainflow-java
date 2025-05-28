@@ -1,4 +1,4 @@
-(ns brainflow-source.core
+(ns brainflow-java.core
   (:require [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.net URL URLClassLoader]           
@@ -18,7 +18,7 @@
    "win32-x86-64" {:files ["BrainFlow.dll" "DataHandler.dll" "MLModule.dll"]
                    :archive "compiled_libs.tar"}})
 
-;; Thread-safe initialization
+; Thread-safe initialization
 (def ^:private initialization-lock (ReentrantLock.))
 (def ^:private initialized? (atom false))
 (def ^:private initialization-error (atom nil))
@@ -156,7 +156,7 @@
                    (str current-path File/pathSeparator native-path))]
     (System/setProperty "java.library.path" new-path)
 
-    ;; Clear the library path cache so Java will re-read it
+    ; Clear the library path cache so Java will re-read it
     (try
       (let [field (.getDeclaredField ClassLoader "sys_paths")]
         (.setAccessible field true)
@@ -176,11 +176,11 @@
           (try
             (println "Initializing BrainFlow...")
 
-            ;; Download and set up Java library
+            ; Download and set up Java library
             (let [jar-file (download-and-cache-jar)]
               (add-jar-to-classpath jar-file))
 
-            ;; Download and set up native libraries  
+            ; Download and set up native libraries  
             (let [native-path (download-and-cache-natives)]
               (setup-native-library-path native-path))
 
@@ -194,7 +194,7 @@
       (finally
         (.unlock initialization-lock)))))
 
-;; Macro to wrap BrainFlow functions with auto-loading
+; Macro to wrap BrainFlow functions with auto-loading
 (defmacro with-brainflow [& body]
   `(do
      (ensure-brainflow-loaded!)
@@ -258,7 +258,7 @@
   brainflow-version)
 
 (defn clear-cache!
-  "Clear the BrainFlow cache directory. Use with caution."
+  "Clear the BrainFlow cache directory."
   []
   (let [cache-dir (get-cache-dir)]
     (when (.exists cache-dir)
