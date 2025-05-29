@@ -1,7 +1,9 @@
 (ns brainflow-java.core
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.java.shell :as cshell])
+            [clojure.edn :as edn]
+            [clojure.java.shell :as cshell]
+            [clojure.pprint :as pprint])
   (:import [java.io File]
            [java.util.concurrent.locks ReentrantLock]))
 
@@ -958,6 +960,36 @@
       (recur (conj acc curr) (.getCause curr))
       acc)))
 
+(defn fully-qualify-map [m]
+  (into {}
+        (map (fn [[k v]]
+               ; If key is keyword with no namespace, or any keyword, fully qualify it manually.
+               (let [new-k (if (keyword? k)
+                             (keyword (namespace k) (name k)) ; keeps fq keyword as-is
+                             k)
+                     new-v (cond
+                             (map? v) (fully-qualify-map v)
+                             (vector? v) (vec (map #(if (map? %) (fully-qualify-map %) %) v))
+                             (seq? v) (doall (map #(if (map? %) (fully-qualify-map %) %) v))
+                             :else v)]
+                 [new-k new-v])))
+        m))
+
+(defn update-project-deps [jar-path]
+  (let [file     (io/file "deps.edn")
+        jar      (io/file jar-path)
+        edn-map  (if (.exists file)
+                   (edn/read-string (slurp file))
+                   {})
+        deps-map (or (:deps edn-map) {})
+        updated-deps (assoc deps-map
+                            'brainflow/brainflow {:local/root (.getAbsolutePath jar)})
+        qualified-deps (fully-qualify-map updated-deps)
+        updated-edn (assoc edn-map :deps qualified-deps)]
+    (with-open [w (io/writer file)]
+      (binding [*print-namespace-maps* false]
+        (pprint/pprint updated-edn w)))))
+
 (defn test-brainflow
   "Test BrainFlow functionality with a synthetic board.
    Returns true if successful, throws exception if failed."
@@ -995,6 +1027,8 @@
        (release-session board))
 
      (println "\n=== BrainFlow installation test PASSED successfully! ===")
+
+     (update-project-deps (str (System/getProperty "user.home") "/.brainflow-java/5.16.0/brainflow-jar-with-dependencies.jar"))
      (println "Your BrainFlow installation is working correctly.")
      true
 
