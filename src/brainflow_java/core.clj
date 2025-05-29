@@ -2,8 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.java.shell :as cshell])
-  (:import [java.net URL URLClassLoader]
-           [java.io File]
+  (:import [java.io File]
            [java.util.concurrent.locks ReentrantLock]))
 
 (def ^:private brainflow-version "5.16.0")
@@ -178,7 +177,7 @@
       (str/includes? os-name "windows")
       (if (= jvm-bits "64")
         "win32-x86-64"
-        "win32-x86")  ; This is the key fix - return 32-bit path for 32-bit JVM
+        "win32-x86") ; Return 32-bit path for 32-bit JVM
 
       :else (throw (RuntimeException. (str "Unsupported platform: " os-name " " os-arch " " jvm-bits "-bit"))))))
 
@@ -244,25 +243,6 @@
   [file platform-extensions]
   (let [name (.getName file)]
     (some #(.endsWith name %) platform-extensions)))
-
-(defn- is-64bit-library?
-  "Check if a library filename suggests it's 64-bit"
-  [filename]
-  (or (str/includes? filename "64")
-      (str/includes? filename "x64")
-      (not (or (str/includes? filename "32")
-               (str/includes? filename "x86")))))
-
-
-(defn- is-32bit-library?
-  "Check if a library filename suggests it's 32-bit"
-  [filename]
-  (let [fname (str/lower-case filename)]
-    (or (str/includes? fname "32")
-        (and (str/includes? fname "x86")
-             (not (or (str/includes? fname "64")
-                      (str/includes? fname "x64")
-                      (str/includes? fname "amd64")))))))
 
 (defn- is-correct-architecture-library?
   "Check if a library file matches the target JVM architecture"
@@ -389,8 +369,9 @@
     ; Return the platform directory path
     (.getAbsolutePath platform-dir)))
 
-(defn- detect-execution-context []
+(defn- detect-execution-context
   "Detect if we're running in REPL or CLI mode"
+  []
   (let [current-loader (.getContextClassLoader (Thread/currentThread))]
     (cond
       (instance? clojure.lang.DynamicClassLoader current-loader) :repl
@@ -421,7 +402,7 @@
         :cli
         (do
           (println "; Using CLI-optimized loading...")
-          ;; Method 1: Try to add to system classloader if possible
+          ; Method 1: Try to add to system classloader if possible
           (try
             (let [system-loader (ClassLoader/getSystemClassLoader)]
               (if (instance? java.net.URLClassLoader system-loader)
@@ -436,7 +417,7 @@
                 (throw (Exception. "System classloader is not URLClassLoader"))))
             (catch Exception e
               (println (format "; System classloader approach failed: %s" (.getMessage e)))
-              ;; Method 2: Create compound classloader
+              ; Method 2: Create compound classloader
               (try
                 (let [current-thread (Thread/currentThread)
                       current-loader (.getContextClassLoader current-thread)
@@ -444,7 +425,7 @@
                       compound-loader (java.net.URLClassLoader. jar-urls current-loader)]
                   (.setContextClassLoader current-thread compound-loader)
 
-                  ;; Also try to set for namespace classloader
+                  ; Also try to set for namespace classloader
                   (when-let [ns-loader (.getClassLoader (class clojure.lang.Namespace))]
                     (try
                       (.setContextClassLoader (Thread/currentThread)
@@ -474,19 +455,19 @@
 
     (doseq [class-name test-classes]
       (try
-        ;; Try multiple class loading approaches
+        ; Try multiple class loading approaches
         (let [loaded-class (or
-                            ;; Method 1: Standard Class/forName
+                            ; Method 1: Standard Class/forName
                             (try (Class/forName class-name) (catch Exception _ nil))
-                            ;; Method 2: Using context classloader explicitly  
+                            ; Method 2: Using context classloader explicitly  
                             (try (.loadClass context-loader class-name) (catch Exception _ nil))
-                            ;; Method 3: Using system classloader
+                            ; Method 3: Using system classloader
                             (try (.loadClass (ClassLoader/getSystemClassLoader) class-name) (catch Exception _ nil)))]
 
           (if loaded-class
             (do
               (println (format "; ✓ Found class: %s" class-name))
-              ;; Cache the classloader that successfully loaded the class
+              ; Cache the classloader that successfully loaded the class
               (when-not @brainflow-classloader
                 (reset! brainflow-classloader
                         (or (try (.getClassLoader loaded-class) (catch Exception _ nil))
@@ -1026,7 +1007,7 @@
            (println "; Detected expected JNA library extraction behavior")
            (explain-jna-messages)
 
-           (throw e)) ; optional: suppress if you want to continue
+           (throw e))
          (do
            (.printStackTrace e)
            (throw e)))))))
@@ -1035,4 +1016,4 @@
   (test-brainflow))
 
 (comment
-  (test-brainflow))
+  (test-brainflow)) 
