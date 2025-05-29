@@ -242,8 +242,9 @@
 
       params-instance)))
 
+
 (defn get-board-shim
-  "Get a BrainFlow board shim. Downloads BrainFlow if needed. Takes board-id (int) 
+  "Get a BrainFlow board shim. Downloads BrainFlow if needed. Takes board-id (int)
    and input-params (map with keys like :serial_port, :ip_address, etc.)"
   [board-id input-params]
   (with-brainflow
@@ -262,7 +263,7 @@
       ; Create BoardShim with proper constructor signature
       (.newInstance (.getDeclaredConstructor board-shim-class
                                              (into-array Class [Integer/TYPE params-class]))
-                    (into-array Object [board-id params-instance])))))
+                    (into-array Object [(int board-id) params-instance])))))
 
 (defn get-default-synth-board-shim
   "Simplified version that takes a board-id and optional parameters map"
@@ -272,10 +273,10 @@
    (with-brainflow
      (let [params-instance (create-input-params params-map)
            board-shim-class (Class/forName "brainflow.BoardShim")]
+       
        (.newInstance (.getDeclaredConstructor board-shim-class
                                               (into-array Class [Integer/TYPE (.getClass params-instance)]))
-                     (into-array Object [board-id params-instance]))))))
-
+                     (into-array Object [(int board-id) params-instance]))))))
 (defn prepare-session
   "Prepare a BrainFlow session. Automatically downloads BrainFlow if needed."
   [board-shim]
@@ -287,7 +288,7 @@
   [board-shim & [buffer-size]]
   (with-brainflow
     (if buffer-size
-      (.start_stream board-shim buffer-size)
+      (.start_stream board-shim (int buffer-size))
       (.start_stream board-shim))))
 
 (defn stop-stream
@@ -301,7 +302,7 @@
   [board-shim & [num-samples]]
   (with-brainflow
     (if num-samples
-      (.get_board_data board-shim num-samples)
+      (.get_board_data board-shim (int num-samples))
       (.get_board_data board-shim))))
 
 (defn release-session
