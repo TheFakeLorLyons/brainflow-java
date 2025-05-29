@@ -3,7 +3,7 @@
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib 'com.github.thefakelorlyons/brainflow-java)
-(def version "1.0.001")
+(def version "1.0.002")
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
@@ -17,6 +17,7 @@
                 :version version
                 :basis basis
                 :src-dirs ["src"]
+                :resource-dirs ["resources"]
                 :scm {:url "https://github.com/thefakelorlyons/brainflow-java"
                       :connection "scm:git:git://github.com/thefakelorlyons/brainflow-java.git"
                       :developerConnection "scm:git:ssh://git@github.com/thefakelorlyons/brainflow-java.git"
@@ -33,6 +34,9 @@
                              [:email "thefakelorlyons@gmail.com"]]]]})
 
   (b/copy-dir {:src-dirs ["src"]
+               :target-dir class-dir})
+
+  (b/copy-dir {:src-dirs ["resources"]
                :target-dir class-dir})
 
   (b/jar {:class-dir class-dir
