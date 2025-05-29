@@ -1,7 +1,8 @@
 {:paths ["src" "resources"]
  :deps {}
  :aliases
- {:build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.9"
+ {:dev {:jvm-opts ["--add-opens=java.base/java.net=ALL-UNNAMED"]}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.9"
                                                 :exclusions [com.google.guava/guava
                                                              org.slf4j/slf4j-nop]}
                  slipset/deps-deploy {:mvn/version "RELEASE"}}
