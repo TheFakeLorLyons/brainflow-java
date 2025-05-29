@@ -230,7 +230,8 @@
   [params-map]
   (with-brainflow
     (let [params-class (Class/forName "brainflow.BrainFlowInputParams")
-          params-instance (.newInstance (.getDeclaredConstructor params-class (into-array Class [])))]
+          constructor (.getDeclaredConstructor params-class (into-array Class []))
+          params-instance (.newInstance constructor (into-array Object []))]
 
       (doseq [[key value] params-map]
         (when value
