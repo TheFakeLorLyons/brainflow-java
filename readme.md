@@ -54,6 +54,6 @@ Files are cached locally in `~/.brainflow-java/` to avoid re-downloading.
 ## Get Started:
 
 Add the following to your `deps.edn`:
-`brainflow-java/brainflow-java {:mvn/version "1.0.006"}`
+`brainflow-java/brainflow-java {:mvn/version "1.0.007"}`
 
 __Lorelai Lyons 2025__

@@ -1107,7 +1107,7 @@
 
      (let [base-path (str (System/getProperty "user.home") "/.brainflow-java/")
            jar-path (str base-path "5.16.0/brainflow-jar-with-dependencies.jar")
-           native-path (str base-path "natives/")]
+           native-path (str base-path "5.16.0/natives/")]
        (update-project-deps jar-path native-path))
      (println "Your BrainFlow installation is working correctly.")
      true
