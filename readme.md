@@ -1,6 +1,6 @@
 # BrainFlow Java for Clojure
 
-This library allows users to elegantly download the necessary dependencies for BrainFlow that automatically, making it easy to work with EEG, EMG, ECG and other biosignal acquisition devices from Clojure.
+This library allows users to elegantly download the necessary dependencies for BrainFlow automatically, making it easy to work with EEG, EMG, ECG and other biosignal acquisition devices from Clojure.
 
 This program will scan the computer to see if there are any missing required dependencies or subdependencies that are necessary to run BrainFlow, install them, and install BrainFlow. It is designed to work on Windows, Mac, and Linux but as of 5/28 has only been tested on Windows.
 

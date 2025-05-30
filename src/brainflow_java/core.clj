@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.shell :as cshell]
-            [clojure.pprint :as pprint])
+            [clojure.pprint :as pprint]
+            [zprint.core :as zprint])
   (:import [java.io File]
            [java.util.concurrent.locks ReentrantLock]))
 
@@ -743,27 +744,27 @@
                                  "See suggestions above."))))))))
 
           ; Step 3: Download and set up native libraries with correct architecture
-        (println "; Setting up native libraries...")
-        (let [native-path-str (download-and-cache-natives)
-              native-path (io/file native-path-str)]
-          (println (format "; Native library path: %s" (.getAbsolutePath native-path)))
+          (println "; Setting up native libraries...")
+          (let [native-path-str (download-and-cache-natives)
+                native-path (io/file native-path-str)]
+            (println (format "; Native library path: %s" (.getAbsolutePath native-path)))
 
             ; Verify libraries exist before trying to load them
-          (if (verify-native-libraries native-path)
-            (do
-              (println "; Native libraries verified, proceeding with setup...")
-              (setup-native-libraries native-path))
-            (throw (RuntimeException.
-                    (format "Native libraries not found for architecture: %s" native-path)))))
+            (if (verify-native-libraries native-path)
+              (do
+                (println "; Native libraries verified, proceeding with setup...")
+                (setup-native-libraries native-path))
+              (throw (RuntimeException.
+                      (format "Native libraries not found for architecture: %s" native-path)))))
 
           ; Step 4: Final verification - try to use BrainFlow classes
-        (try
-          (verify-brainflow-classes)
-          (reset! initialized? true)
-          (println "; BrainFlow initialization complete!")
-          (catch Exception e
-            (println "; ✗ BrainFlow class verification failed")
-            (throw e)))
+          (try
+            (verify-brainflow-classes)
+            (reset! initialized? true)
+            (println "; BrainFlow initialization complete!")
+            (catch Exception e
+              (println "; ✗ BrainFlow class verification failed")
+              (throw e)))
 
           (catch Exception e
             (reset! initialization-error e)
@@ -960,35 +961,108 @@
       (recur (conj acc curr) (.getCause curr))
       acc)))
 
-(defn fully-qualify-map [m]
-  (into {}
+(defn update-gitignore
+  [filename]
+  (let [gitignore-file (io/file ".gitignore")
+        existing-content (if (.exists gitignore-file)
+                           (slurp gitignore-file)
+                           "")
+        lines (if (empty? existing-content)
+                []
+                (clojure.string/split-lines existing-content))]
+
+    (when-not (some #(= (clojure.string/trim %) filename) lines)
+      (with-open [w (io/writer gitignore-file :append true)]
+        (when-not (empty? existing-content)
+          (.write w "\n"))
+        (.write w "# BrainFlow local dependencies\n")
+        (.write w (str filename "\n"))))))
+
+(defn build-native-path
+  "Builds the full native path including platform-specific directory"
+  [base-native-path]
+  (let [platform (get-os-arch)
+        full-path (str base-native-path platform "/")]
+    (println (format "Detected platform: %s" platform))
+    (println (format "Native library path: %s" full-path))
+    full-path))
+
+(defn create-brainflow-local-edn
+  "Creates the brainflow-local.edn file with the actual JAR path"
+  [jar-path]
+  (let [local-file (io/file "brainflow-local.edn")
+        jar (io/file jar-path)
+        local-brainflow-dep {'brainflow/brainflow {:local/root (.getAbsolutePath jar)}}]
+
+    ; Write the local brainflow dependency file (gitignored)
+    (with-open [w (io/writer local-file)]
+      (binding [*print-namespace-maps* false]
+        (pprint/pprint local-brainflow-dep w)))
+
+    (println (format "✓ Created brainflow-local.edn with path: %s" (.getAbsolutePath jar)))
+    local-file))
+
+(defn sort-aliases [aliases]
+  (into (sorted-map)                        ; natural ascending order
         (map (fn [[k v]]
-               ; If key is keyword with no namespace, or any keyword, fully qualify it manually.
-               (let [new-k (if (keyword? k)
-                             (keyword (namespace k) (name k)) ; keeps fq keyword as-is
-                             k)
-                     new-v (cond
-                             (map? v) (fully-qualify-map v)
-                             (vector? v) (vec (map #(if (map? %) (fully-qualify-map %) %) v))
-                             (seq? v) (doall (map #(if (map? %) (fully-qualify-map %) %) v))
-                             :else v)]
-                 [new-k new-v])))
+               [k (if (map? v) (sort-aliases v) v)]))
+        aliases))
+
+(defn smart-sort [m]
+  (into (sorted-map-by #(compare %2 %1))   ; reverse top-level keys
+        (map (fn [[k v]]
+               (cond
+                 (= k :aliases) [k (sort-aliases v)]  ; sort aliases ascending
+                 (map? v)          [k (smart-sort v)] ; recurse other maps
+                 :else             [k v])))
         m))
 
-(defn update-project-deps [jar-path]
-  (let [file     (io/file "deps.edn")
-        jar      (io/file jar-path)
-        edn-map  (if (.exists file)
-                   (edn/read-string (slurp file))
-                   {})
-        deps-map (or (:deps edn-map) {})
-        updated-deps (assoc deps-map
-                            'brainflow/brainflow {:local/root (.getAbsolutePath jar)})
-        qualified-deps (fully-qualify-map updated-deps)
-        updated-edn (assoc edn-map :deps qualified-deps)]
-    (with-open [w (io/writer file)]
-      (binding [*print-namespace-maps* false]
-        (pprint/pprint updated-edn w)))))
+(defn update-project-deps
+  "Updates deps.edn to reference brainflow-local.edn under :flow alias"
+  [jar-path native-lib-base-path]
+  (let [deps-file (io/file "deps.edn")
+
+        ; Create the brainflow-local.edn file first
+        _ (create-brainflow-local-edn jar-path)
+
+        ; Read existing deps.edn
+        edn-map (if (.exists deps-file)
+                  (edn/read-string (slurp deps-file))
+                  {})
+
+        ; Get existing aliases
+        aliases (or (:aliases edn-map) {})
+        existing-flow (get aliases :flow {})
+
+        ; Build the :flow alias to reference the brainflow-local.edn file
+        final-flow (-> existing-flow
+                       (assoc :deps-file "brainflow-local.edn")
+                       (dissoc :extra-deps))
+
+        ; Update aliases map
+        updated-aliases (assoc aliases :flow final-flow)
+
+        ; Build the final EDN structure
+        final-edn (assoc edn-map :aliases updated-aliases)]
+
+    ; Write using spit to avoid pretty-print formatting issues
+    (spit deps-file
+          (zprint/zprint-str (smart-sort final-edn)
+                             {:map {:sort? false}}))
+
+    ; Verify the written file is valid
+    (try
+      (edn/read-string (slurp deps-file))
+      (println "✓ deps.edn updated and verified as valid EDN")
+      (catch Exception e
+        (println "ERROR: Generated invalid EDN file")
+        (throw e)))
+
+    ; Update gitignore
+    (update-gitignore "brainflow-local.edn")
+
+    (println "✓ Updated deps.edn to reference brainflow-local.edn file in :flow alias")
+    (println "✓ Users can run: clojure -M:flow -m floj.cli")))
 
 (defn test-brainflow
   "Test BrainFlow functionality with a synthetic board.
@@ -1028,7 +1102,10 @@
 
      (println "\n=== BrainFlow installation test PASSED successfully! ===")
 
-     (update-project-deps (str (System/getProperty "user.home") "/.brainflow-java/5.16.0/brainflow-jar-with-dependencies.jar"))
+     (let [base-path (str (System/getProperty "user.home") "/.brainflow-java/")
+           jar-path (str base-path "5.16.0/brainflow-jar-with-dependencies.jar")
+           native-path (str base-path "natives/")]
+       (update-project-deps jar-path native-path))
      (println "Your BrainFlow installation is working correctly.")
      true
 
@@ -1050,4 +1127,4 @@
   (test-brainflow))
 
 (comment
-  (test-brainflow)) 
+  (test-brainflow))
