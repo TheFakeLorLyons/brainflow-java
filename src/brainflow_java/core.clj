@@ -993,25 +993,29 @@
       path
       (str path sep))))
 
-(defn create-brainflow-local-edn
-  "Creates the brainflow-local.edn file with the actual JAR path and jvm-opts"
+(defn create-brainflow-local-deps
+  "Creates a local-brainflow directory with deps.edn file"
   [jar-path native-lib-path]
-  (let [local-file (io/file "brainflow-local.edn")
+  (let [local-dir (io/file "brainflow-local")
+        deps-file (io/file local-dir "deps.edn")
         jar (io/file jar-path)
         native-path (-> (io/file native-lib-path)
                         .getAbsolutePath
                         ensure-trailing-separator)
 
         brainflow-dep {:deps {'brainflow/brainflow {:local/root (.getAbsolutePath jar)}}
-                       :jvm-opts [(str "-Djava.library.path=" native-path)]}]
+                       :aliases {:default {:jvm-opts [(str "-Djava.library.path=" native-path)]}}}]
 
-    ; Write the brainflow-local.edn file (gitignored)
-    (with-open [w (io/writer local-file)]
+    ; Create directory if it doesn't exist
+    (.mkdirs local-dir)
+
+    ; Write the deps.edn file inside the directory
+    (with-open [w (io/writer deps-file)]
       (binding [*print-namespace-maps* false]
         (pprint/pprint brainflow-dep w)))
 
-    (println (format "✓ Created brainflow-local.edn with path: %s" (.getAbsolutePath jar)))
-    local-file))
+    (println (format "✓ Created local-brainflow/deps.edn with path: %s" (.getAbsolutePath jar)))
+    local-dir))
 
 (defn sort-aliases [aliases]
   (into (sorted-map)                        ; natural ascending order
@@ -1029,24 +1033,22 @@
         m))
 
 (defn update-project-deps
-  "Updates deps.edn to reference brainflow-local.edn under :flow alias"
+  "Updates deps.edn to reference local-brainflow directory under :flow alias"
   [jar-path native-lib-base-path]
   (let [deps-file (io/file "deps.edn")
         native-lib-path (build-native-path native-lib-base-path)
 
-        ; Create brainflow-local.edn with jvm-opts
-        _ (create-brainflow-local-edn jar-path native-lib-path)
+        ; Create local-brainflow directory with deps.edn
+        _ (create-brainflow-local-deps jar-path native-lib-path)
 
         edn-map (if (.exists deps-file)
                   (edn/read-string (slurp deps-file))
                   {})
 
         aliases (or (:aliases edn-map) {})
-        existing-flow (get aliases :flow {})
 
-        final-flow (-> existing-flow
-                       (assoc :deps-file "brainflow-local.edn")
-                       (dissoc :extra-deps))
+        ; Point to the directory containing deps.edn, not the file itself
+        final-flow {:local/root "brainflow-local"}
 
         updated-aliases (assoc aliases :flow final-flow)
         final-edn (assoc edn-map :aliases updated-aliases)]
@@ -1062,10 +1064,11 @@
         (println "ERROR: Generated invalid EDN file")
         (throw e)))
 
-    (update-gitignore "brainflow-local.edn")
+    ; Add local-brainflow directory to gitignore
+    (update-gitignore "brainflow-local/")
 
-    (println "✓ Updated deps.edn to reference brainflow-local.edn file in :flow alias")
-    (println "✓ Users can run: clojure -M:flow -m floj.cli")))
+    (println "✓ Updated deps.edn to reference local-brainflow directory in :flow alias")
+    (println "✓ Users can run: clojure -A:flow -m floj.cli")))
 
 (defn test-brainflow
   "Test BrainFlow functionality with a synthetic board.
