@@ -7,7 +7,9 @@ This program will scan the computer to see if there are any missing required dep
 If the user does not have the required underlying C++ runtimes, it will prompt the user to respond 'y' or 'no' to downloading the dependencies.
 
 The program can be run either at the repl using test-brainflow at the bottom of the namespace (or technically by running ensure-brainflow-loaded! on its own), or by running the main function at the command line via:
-- `clj -M:dev core.clj` 
+- `clj -M:dev core.clj`
+
+Currently this will add local paths to whatever deps.edn file is using the project. Using the function `(remove-brainflow-from-deps)` will remove user-dependent paths from deps so that published code will not include unusable paths.
 
 ## What is BrainFlow?
 
@@ -54,6 +56,6 @@ Files are cached locally in `~/.brainflow-java/` to avoid re-downloading.
 ## Get Started:
 
 Add the following to your `deps.edn`:
-`brainflow-java/brainflow-java {:mvn/version "1.0.008"}`
+`brainflow-java/brainflow-java {:mvn/version "1.0.009"}`
 
 __Lorelai Lyons 2025__

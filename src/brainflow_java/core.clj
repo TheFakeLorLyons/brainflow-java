@@ -5,7 +5,8 @@
             [clojure.java.shell :as cshell]
             [clojure.pprint :as pprint]
             [zprint.core :as zprint])
-  (:import [java.io File]
+  (:import [java.nio.file Paths]
+           [java.io File]
            [java.util.concurrent.locks ReentrantLock]))
 
 (def ^:private brainflow-version "5.16.0")
@@ -961,22 +962,70 @@
       (recur (conj acc curr) (.getCause curr))
       acc)))
 
-(defn update-gitignore
-  [filename]
-  (let [gitignore-file (io/file ".gitignore")
-        existing-content (if (.exists gitignore-file)
-                           (slurp gitignore-file)
-                           "")
-        lines (if (empty? existing-content)
-                []
-                (clojure.string/split-lines existing-content))]
+(defn fully-qualify-map [m]
+  (into {}
+        (map (fn [[k v]]
+               ; If key is keyword with no namespace, or any keyword, fully qualify it manually.
+               (let [new-k (if (keyword? k)
+                             (keyword (namespace k) (name k)) ; keeps fq keyword as-is
+                             k)
+                     new-v (cond
+                             (map? v) (fully-qualify-map v)
+                             (vector? v) (vec (map #(if (map? %) (fully-qualify-map %) %) v))
+                             (seq? v) (doall (map #(if (map? %) (fully-qualify-map %) %) v))
+                             :else v)]
+                 [new-k new-v])))
+        m))
 
-    (when-not (some #(= (clojure.string/trim %) filename) lines)
-      (with-open [w (io/writer gitignore-file :append true)]
-        (when-not (empty? existing-content)
-          (.write w "\n"))
-        (.write w "# BrainFlow local dependencies\n")
-        (.write w (str filename "\n"))))))
+(defn remove-brainflow-from-deps
+  "Removes brainflow dependency from :flow alias and :deps for distribution"
+  []
+  (let [deps-file (io/file "deps.edn")
+        edn-map (if (.exists deps-file)
+                  (edn/read-string (slurp deps-file))
+                  {})
+
+        ; Grab current aliases and deps sections
+        aliases (or (:aliases edn-map) {})
+        deps (or (:deps edn-map) {})
+
+        ; Remove brainflow from :deps section
+        clean-deps (dissoc deps 'brainflow/brainflow)
+
+        ; Get and clean the :flow alias
+        flow-alias (get aliases :flow {})
+        existing-extra-deps (or (:extra-deps flow-alias) {})
+        clean-extra-deps (dissoc existing-extra-deps 'brainflow/brainflow)
+
+        ; Remove native lib path from jvm-opts
+        existing-jvm-opts (or (:jvm-opts flow-alias) [])
+        clean-jvm-opts (remove #(.contains % "java.library.path") existing-jvm-opts)
+
+        ; Update flow alias
+        clean-flow (cond-> flow-alias
+                     (seq clean-extra-deps) (assoc :extra-deps clean-extra-deps)
+                     (empty? clean-extra-deps) (dissoc :extra-deps)
+                     (seq clean-jvm-opts) (assoc :jvm-opts (vec clean-jvm-opts))
+                     (empty? clean-jvm-opts) (dissoc :jvm-opts))
+
+        ; Update aliases
+        clean-aliases (if (empty? (dissoc clean-flow :extra-deps :jvm-opts))
+                        (dissoc aliases :flow)  ; Remove :flow if it's empty
+                        (assoc aliases :flow clean-flow))
+
+        ; Final updated EDN map
+        clean-edn (assoc edn-map
+                         :deps clean-deps
+                         :aliases clean-aliases)]
+
+    ; Use zprint to format the EDN structure before writing it to the file
+    (spit deps-file
+          (zprint/zprint-str clean-edn
+                             {:map {:sort? false}
+                              :width 80}))
+
+    (println "✓ Removed brainflow from :flow alias and :deps")
+    (println "✓ Ready for distribution")))
 
 (defn build-native-path
   "Builds the full native path including platform-specific directory"
@@ -988,84 +1037,68 @@
     full-path))
 
 (defn ensure-trailing-separator [^String path]
-  (let [sep (System/getProperty "file.separator")]
-    (if (.endsWith path sep)
-      path
-      (str path sep))))
+  (let [sep (System/getProperty "file.separator")
+        normalized-path (str/replace path "\\" "/")]
+    (if (.endsWith normalized-path "/")
+      normalized-path
+      (str normalized-path "/"))))
 
-(defn create-brainflow-local-deps
-  "Creates a local-brainflow directory with deps.edn file"
-  [jar-path native-lib-path]
-  (let [local-dir (io/file "brainflow-local")
-        deps-file (io/file local-dir "deps.edn")
-        jar (io/file jar-path)
-        native-path (-> (io/file native-lib-path)
-                        .getAbsolutePath
-                        ensure-trailing-separator)
-
-        brainflow-dep {:deps {'brainflow/brainflow {:local/root (.getAbsolutePath jar)}}
-                       :aliases {:default {:jvm-opts [(str "-Djava.library.path=" native-path)]}}}]
-
-    ; Create directory if it doesn't exist
-    (.mkdirs local-dir)
-
-    ; Write the deps.edn file inside the directory
-    (with-open [w (io/writer deps-file)]
-      (binding [*print-namespace-maps* false]
-        (pprint/pprint brainflow-dep w)))
-
-    (println (format "✓ Created local-brainflow/deps.edn with path: %s" (.getAbsolutePath jar)))
-    local-dir))
-
-(defn sort-aliases [aliases]
-  (into (sorted-map)                        ; natural ascending order
-        (map (fn [[k v]]
-               [k (if (map? v) (sort-aliases v) v)]))
-        aliases))
-
-(defn smart-sort [m]
-  (into (sorted-map-by #(compare %2 %1))   ; reverse top-level keys
-        (map (fn [[k v]]
-               (cond
-                 (= k :aliases) [k (sort-aliases v)]  ; sort aliases ascending
-                 (map? v)          [k (smart-sort v)] ; recurse other maps
-                 :else             [k v])))
-        m))
+(defn normalize-path [path]
+  (let [file-path (Paths/get path (into-array String []))]
+    (-> file-path
+        .normalize
+        .toString
+        (.replace "\\" "/"))))
 
 (defn update-project-deps
   "Updates deps.edn to reference local-brainflow directory under :flow alias"
   [jar-path native-lib-base-path]
   (let [deps-file (io/file "deps.edn")
         native-lib-path (build-native-path native-lib-base-path)
+        normalized-lib-path (normalize-path native-lib-path)
+        lib-path-with-separator (ensure-trailing-separator normalized-lib-path)
+        jvm-opts (str "-Djava.library.path=" lib-path-with-separator)
 
-        ; Create local-brainflow directory with deps.edn
-        _ (create-brainflow-local-deps jar-path native-lib-path)
-
+        ; Update the existing deps.edn file with new dependency and alias
         edn-map (if (.exists deps-file)
                   (edn/read-string (slurp deps-file))
                   {})
 
+        deps-map (or (:deps edn-map) {})
         aliases (or (:aliases edn-map) {})
 
-        ; Point to the directory containing deps.edn, not the file itself
-        final-flow {:local/root "brainflow-local"}
+        ; Add the new dependency for brainflow/brainflow
+        updated-deps (assoc deps-map
+                            'brainflow/brainflow {:local/root (normalize-path (str jar-path))})
 
-        updated-aliases (assoc aliases :flow final-flow)
-        final-edn (assoc edn-map :aliases updated-aliases)]
+        ; Determine the flow alias and update it with the new jvm-opts
+        flow-alias (get aliases :flow {})
 
+        updated-flow (assoc flow-alias
+                            :jvm-opts (conj (:jvm-opts flow-alias [])
+                                            jvm-opts))
+
+        updated-aliases (if (contains? aliases :flow)
+                          (assoc aliases :flow updated-flow)
+                          (assoc aliases :flow {:jvm-opts [jvm-opts]}))
+
+        ; Final map after adding dependency and alias
+        final-edn (assoc edn-map
+                         :deps (fully-qualify-map updated-deps)
+                         :aliases updated-aliases)]
+
+    ; Use zprint to format the EDN structure before writing it to the file
     (spit deps-file
-          (zprint/zprint-str (smart-sort final-edn)
-                             {:map {:sort? false}}))
+          (zprint/zprint-str final-edn
+                             {:map {:sort? false}
+                              :width 80}))
 
     (try
-      (edn/read-string (slurp deps-file))
+      (edn/read-string (slurp deps-file))  ; Try to read and verify EDN structure
       (println "✓ deps.edn updated and verified as valid EDN")
       (catch Exception e
         (println "ERROR: Generated invalid EDN file")
         (throw e)))
-
-    ; Add local-brainflow directory to gitignore
-    (update-gitignore "brainflow-local/")
 
     (println "✓ Updated deps.edn to reference local-brainflow directory in :flow alias")
     (println "✓ Users can run: clojure -A:flow -m floj.cli")))
