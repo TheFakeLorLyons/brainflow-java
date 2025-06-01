@@ -3,7 +3,6 @@
             [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.shell :as cshell]
-            [clojure.pprint :as pprint]
             [zprint.core :as zprint])
   (:import [java.nio.file Paths]
            [java.io File]
@@ -1103,6 +1102,22 @@
     (println "✓ Updated deps.edn to reference local-brainflow directory in :flow alias")
     (println "✓ Users can run: clojure -A:flow -m floj.cli")))
 
+(defn save-brainflow-config!
+  "Save brainflow configuration for derived projects."
+  [jar-path native-lib-base-path]
+  (let [native-lib-path (build-native-path native-lib-base-path)
+        normalized-lib-path (normalize-path native-lib-path)
+        lib-path-with-separator (ensure-trailing-separator normalized-lib-path)
+        jvm-opts (str "-Djava.library.path=" lib-path-with-separator)
+
+        config {:brainflow-dep {:local/root (normalize-path (str jar-path))}
+                :jvm-opts [jvm-opts]}
+
+        config-file (io/file (str jar-path "/../brainflow-config.edn"))] ; Save alongside the jar
+
+    (spit config-file (pr-str config))
+    (println "✓ Saved brainflow config for derived projects")))
+
 (defn test-brainflow
   "Test BrainFlow functionality with a synthetic board.
    Returns true if successful, throws exception if failed."
@@ -1144,7 +1159,9 @@
      (let [base-path (str (System/getProperty "user.home") "/.brainflow-java/")
            jar-path (str base-path "5.16.0/brainflow-jar-with-dependencies.jar")
            native-path (str base-path "5.16.0/natives/")]
-       (update-project-deps jar-path native-path))
+       (update-project-deps jar-path native-path)
+       (save-brainflow-config! jar-path native-path))
+     
      (println "Your BrainFlow installation is working correctly.")
      true
 
