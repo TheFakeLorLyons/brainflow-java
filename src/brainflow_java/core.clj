@@ -89,17 +89,15 @@
 (defn- check-and-install-dependencies
   "Check for dependencies and offer to install them automatically"
   []
-  (when (str/includes? (str/lower-case (System/getProperty "os.name")) "windows")
+  (if (str/includes? (str/lower-case (System/getProperty "os.name")) "windows")
     (let [system32 (str (System/getenv "WINDIR") "\\System32\\")
           test-dlls ["VCRUNTIME140.dll" "MSVCP140.dll" "api-ms-win-crt-runtime-l1-1-0.dll"]
           missing-dlls (filter #(not (.exists (io/file system32 %))) test-dlls)]
-
       (when (seq missing-dlls)
         (println "\n⚠️  Missing Visual C++ Runtime Dependencies:")
         (doseq [dll missing-dlls]
           (println (str "   - " dll)))
         (println)
-
         (if (babashka-available?)
           (do
             (print "Would you like to automatically install Visual C++ Redistributables? [Y/n]: ")
@@ -116,7 +114,8 @@
             (println "Install Babashka: https://github.com/babashka/babashka#installation")
             (println "Or install Visual C++ Redistributables manually:")
             (print-manual-vcredist-instructions)
-            false))))))
+            false))))
+            true))
 
 (defn get-actual-jvm-bitness
   "More robust JVM bitness detection"
