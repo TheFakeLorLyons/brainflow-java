@@ -1118,7 +1118,8 @@
         config {:brainflow-dep {:local/root (normalize-path (str jar-path))}
                 :jvm-opts [jvm-opts]}
 
-        config-file (io/file (str jar-path "/../brainflow-config.edn"))] ; Save alongside the jar
+        cache-dir (get-cache-dir)
+        config-file (io/file cache-dir "brainflow-config.edn")]
 
     (spit config-file (pr-str config))
     (println "✓ Saved brainflow config for derived projects")))
