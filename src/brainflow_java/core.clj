@@ -372,10 +372,10 @@
                    (not (.equals file archive-file))
                    (not (.equals file jar-file))  ;; ADD THIS LINE
                    (not (str/starts-with? (.getAbsolutePath file) (.getAbsolutePath platform-dir))))
-          (.delete file)))
+          (.delete file))))
 
     ; Return the platform directory path
-      (.getAbsolutePath platform-dir)))
+    (.getAbsolutePath platform-dir)))
 
 (defn- detect-execution-context
   "Detect if we're running in REPL or CLI mode"
