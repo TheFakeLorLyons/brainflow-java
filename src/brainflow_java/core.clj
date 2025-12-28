@@ -337,7 +337,8 @@
         platform-dir (io/file cache-dir "natives" platform)
         platform-extensions (get-platform-extensions)
         archive-name "compiled_libs.tar"
-        archive-file (io/file cache-dir archive-name)]
+        archive-file (io/file cache-dir archive-name)
+        jar-file (io/file cache-dir "brainflow-jar-with-dependencies.jar")]
 
     (.mkdirs platform-dir)
 
@@ -369,11 +370,12 @@
       (doseq [file (file-seq cache-dir)]
         (when (and (.isFile file)
                    (not (.equals file archive-file))
+                   (not (.equals file jar-file))  ;; ADD THIS LINE
                    (not (str/starts-with? (.getAbsolutePath file) (.getAbsolutePath platform-dir))))
-          (.delete file))))
+          (.delete file)))
 
     ; Return the platform directory path
-    (.getAbsolutePath platform-dir)))
+      (.getAbsolutePath platform-dir)))
 
 (defn- detect-execution-context
   "Detect if we're running in REPL or CLI mode"
