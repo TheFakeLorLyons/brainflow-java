@@ -93,29 +93,33 @@
     (let [system32 (str (System/getenv "WINDIR") "\\System32\\")
           test-dlls ["VCRUNTIME140.dll" "MSVCP140.dll" "api-ms-win-crt-runtime-l1-1-0.dll"]
           missing-dlls (filter #(not (.exists (io/file system32 %))) test-dlls)]
-      (when (seq missing-dlls)
-        (println "\n⚠️  Missing Visual C++ Runtime Dependencies:")
-        (doseq [dll missing-dlls]
-          (println (str "   - " dll)))
-        (println)
-        (if (babashka-available?)
-          (do
-            (print "Would you like to automatically install Visual C++ Redistributables? [Y/n]: ")
-            (flush)
-            (let [response (str/trim (read-line))]
-              (if (or (empty? response) (= "y" (str/lower-case response)))
-                (install-dependencies-with-babashka)
-                (do
-                  (println "Skipping automatic installation.")
-                  (print-manual-vcredist-instructions)
-                  false))))
-          (do
-            (println "Automatic installation requires Babashka.")
-            (println "Install Babashka: https://github.com/babashka/babashka#installation")
-            (println "Or install Visual C++ Redistributables manually:")
-            (print-manual-vcredist-instructions)
-            false))))
-            true))
+      (if (seq missing-dlls)
+        (do
+          (println "\n⚠️  Missing Visual C++ Runtime Dependencies:")
+          (doseq [dll missing-dlls]
+            (println (str "   - " dll)))
+          (println)
+          (if (babashka-available?)
+            (do
+              (print "Would you like to automatically install Visual C++ Redistributables? [Y/n]: ")
+              (flush)
+              (let [response (str/trim (read-line))]
+                (if (or (empty? response) (= "y" (str/lower-case response)))
+                  (install-dependencies-with-babashka)
+                  (do
+                    (println "Skipping automatic installation.")
+                    (print-manual-vcredist-instructions)
+                    false))))
+            (do
+              (println "Automatic installation requires Babashka.")
+              (println "Install Babashka: https://github.com/babashka/babashka#installation")
+              (println "Or install Visual C++ Redistributables manually:")
+              (print-manual-vcredist-instructions)
+              false)))
+        true))
+    (do
+      (println "; ✓ Platform dependencies check passed (Linux/macOS)")
+      true)))
 
 (defn get-actual-jvm-bitness
   "More robust JVM bitness detection"
@@ -1160,7 +1164,7 @@
            native-path (str base-path "5.16.0/natives/")]
        (update-project-deps jar-path native-path)
        (save-brainflow-config! jar-path native-path))
-     
+
      (println "Your BrainFlow installation is working correctly.")
      true
 
